@@ -1,0 +1,11 @@
+[package]
+name = "sandbox"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+tokio = { workspace = true }
+serde = { workspace = true }
+foliage-rs = { path = "../foliage" }
+rand = "0.9.0"
+thiserror = { workspace = true }

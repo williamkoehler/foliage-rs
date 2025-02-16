@@ -1,0 +1,18 @@
+[package]
+name = "foliage-rs"
+version = "0.1.0"
+edition = "2021"
+
+[features]
+default = []
+
+[dependencies]
+tokio = { workspace = true }
+serde = { workspace = true }
+bincode = { workspace = true }
+tokio-util = { workspace = true }
+futures = { workspace = true }
+bytes = { workspace = true }
+thiserror = { workspace = true }
+sha3 = { workspace = true }
+hex = { workspace = true }
