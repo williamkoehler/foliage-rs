@@ -12,6 +12,7 @@ pub type Tag = u16;
 pub type Id = u16;
 type Kind = u8;
 
+#[derive(Debug, PartialEq, Eq)]
 pub enum Payload<Request, Response> {
     Request(Request),
     Response(Response),
@@ -138,5 +139,112 @@ where
                 phantom_data: PhantomData,
             },
         )
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[derive(Debug, PartialEq, Eq, Serialize, Deserialize)]
+    struct Data {
+        a: u32,
+        b: bool,
+        c: String,
+        d: Vec<String>,
+    }
+
+    impl Data {
+        pub fn new() -> Self {
+            Data {
+                a: 42,
+                b: true,
+                c: "Hello, world!".to_string(),
+                d: vec!["a".to_string(), "b".to_string(), "c".to_string()],
+            }
+        }
+    }
+
+    type SimpleMessage = Message<String, String>;
+    type ComplexMessage = Message<Data, Data>;
+
+    #[test]
+    fn test_simple_request_serialization() {
+        let message: SimpleMessage = SimpleMessage {
+            tag: 1234,
+            id: 4052,
+            payload: Payload::Request("Some random message".to_string()),
+        };
+
+        let raw = bincode::serialize(&message).unwrap();
+        let message2: SimpleMessage = bincode::deserialize(&raw).unwrap();
+
+        assert_eq!(message.tag, message2.tag);
+        assert_eq!(message.id, message2.id);
+        assert_eq!(message.payload, message2.payload);
+    }
+
+    #[test]
+    fn test_simple_response_serialization() {
+        let message: SimpleMessage = SimpleMessage {
+            tag: 1234,
+            id: 6184,
+            payload: Payload::Response("Some random message".to_string()),
+        };
+
+        let raw = bincode::serialize(&message).unwrap();
+        let message2: SimpleMessage = bincode::deserialize(&raw).unwrap();
+
+        assert_eq!(message.tag, message2.tag);
+        assert_eq!(message.id, message2.id);
+        assert_eq!(message.payload, message2.payload);
+    }
+
+    #[test]
+    fn test_complex_request_serialization() {
+        let message: ComplexMessage = ComplexMessage {
+            tag: 1321,
+            id: 1943,
+            payload: Payload::Request(Data::new()),
+        };
+
+        let raw = bincode::serialize(&message).unwrap();
+        let message2: ComplexMessage = bincode::deserialize(&raw).unwrap();
+
+        assert_eq!(message.tag, message2.tag);
+        assert_eq!(message.id, message2.id);
+        assert_eq!(message.payload, message2.payload);
+    }
+
+    #[test]
+    fn test_complex_response_serialization() {
+        let message: ComplexMessage = ComplexMessage {
+            tag: 2053,
+            id: 2305,
+            payload: Payload::Response(Data::new()),
+        };
+
+        let raw = bincode::serialize(&message).unwrap();
+        let message2: ComplexMessage = bincode::deserialize(&raw).unwrap();
+
+        assert_eq!(message.tag, message2.tag);
+        assert_eq!(message.id, message2.id);
+        assert_eq!(message.payload, message2.payload);
+    }
+
+    #[test]
+    fn test_error_serialization() {
+        let message: SimpleMessage = SimpleMessage {
+            tag: 1058,
+            id: 4932,
+            payload: Payload::Error("Oh no something happened!".to_string()),
+        };
+
+        let raw = bincode::serialize(&message).unwrap();
+        let message2: SimpleMessage = bincode::deserialize(&raw).unwrap();
+
+        assert_eq!(message.tag, message2.tag);
+        assert_eq!(message.id, message2.id);
+        assert_eq!(message.payload, message2.payload);
     }
 }
