@@ -1,0 +1,24 @@
+[package]
+name = "foliage-rpc"
+version = "0.1.0"
+edition = "2021"
+description = "Simple two-way rpc library"
+keywords = ["rpc", "two-way", "duplex", "unix", "socket"]
+license = "MIT"
+readme = "README.md"
+repository = "https://github.com/williamkoehler/foliage-rs"
+authors = ["William Köhler <williamkoehler0@gmail.com>"]
+rust-version = "1.84"
+
+[dependencies]
+foliage-marcos = { path = "../foliage-macros" }
+
+tokio = { version = "1.42.0", features = ["full"] }
+serde = { version = "1.0.217", features = ["derive"] }
+bincode = { version = "1.3.3" }
+tokio-util = { version = "0.7.13", features = ["codec"] }
+futures = "0.3"
+bytes = "1"
+thiserror = "2.0.11"
+sha3 = "0.10.8"
+hex = "0.4.3"

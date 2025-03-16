@@ -8,43 +8,39 @@ use std::marker::PhantomData;
 
 use serde::{de::*, ser::*, *};
 
-pub type Tag = u16;
 pub type Id = u16;
 type Kind = u8;
 
 #[derive(Debug, PartialEq, Eq)]
-pub enum Payload<Request, Response> {
+pub enum Payload<Request, Response, Error> {
     Request(Request),
     Response(Response),
-    Error(String),
+    Error(Error),
 }
 
 const REQUEST_KIND: Kind = 0x11;
 const RESPONSE_KIND: Kind = 0x12;
 const ERROR_KIND: Kind = 0x13;
 
-pub struct Message<Request, Response> {
-    pub tag: Tag,
+pub struct Message<Request, Response, Error> {
     pub id: Id,
-    pub payload: Payload<Request, Response>,
+    pub payload: Payload<Request, Response, Error>,
 }
 
-impl<Request, Response> Serialize for Message<Request, Response>
+impl<Request, Response, Error> Serialize for Message<Request, Response, Error>
 where
     Request: Serialize,
     Response: Serialize,
+    Error: Serialize,
 {
     fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
     where
         S: Serializer,
     {
-        let mut tuple = serializer.serialize_tuple(4)?;
-
-        // Write message tag
-        tuple.serialize_element::<Tag>(&self.tag)?;
+        let mut tuple = serializer.serialize_tuple(3)?;
 
         // Write message id
-        tuple.serialize_element::<Tag>(&self.id)?;
+        tuple.serialize_element::<Id>(&self.id)?;
 
         // Write message kind and payload
         match &self.payload {
@@ -58,7 +54,7 @@ where
             }
             Payload::Error(error) => {
                 tuple.serialize_element::<Kind>(&ERROR_KIND)?;
-                tuple.serialize_element::<String>(error)?;
+                tuple.serialize_element::<Error>(error)?;
             }
         }
 
@@ -66,25 +62,27 @@ where
     }
 }
 
-impl<'de, Request, Response> Deserialize<'de> for Message<Request, Response>
+impl<'de, Request, Response, Error> Deserialize<'de> for Message<Request, Response, Error>
 where
     for<'de2> Request: Deserialize<'de2>,
     for<'de2> Response: Deserialize<'de2>,
+    for<'de2> Error: Deserialize<'de2>,
 {
     fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
     where
         D: serde::Deserializer<'de>,
     {
-        struct MessageVisitor<Request, Response> {
-            phantom_data: PhantomData<(Request, Response)>,
+        struct MessageVisitor<Request, Response, Error> {
+            phantom_data: PhantomData<(Request, Response, Error)>,
         }
 
-        impl<'de, Request, Response> Visitor<'de> for MessageVisitor<Request, Response>
+        impl<'de, Request, Response, Error> Visitor<'de> for MessageVisitor<Request, Response, Error>
         where
             for<'de2> Request: Deserialize<'de2>,
             for<'de2> Response: Deserialize<'de2>,
+            for<'de2> Error: Deserialize<'de2>,
         {
-            type Value = Message<Request, Response>;
+            type Value = Message<Request, Response, Error>;
 
             fn expecting(&self, formatter: &mut std::fmt::Formatter) -> std::fmt::Result {
                 formatter.write_str("a tuple of a u16 tag, u8, kind and payload")
@@ -95,22 +93,16 @@ where
                 A: de::SeqAccess<'de>,
                 A::Error: de::Error,
             {
-                // Read message tag
-                let tag = match seq.next_element::<Tag>()? {
-                    Some(tag) => tag,
-                    None => return Err(de::Error::invalid_length(0, &self)),
-                };
-
                 // Read message id
                 let id = match seq.next_element::<Id>()? {
                     Some(id) => id,
-                    None => return Err(de::Error::invalid_length(1, &self)),
+                    None => return Err(de::Error::invalid_length(0, &self)),
                 };
 
                 // Read message kind
                 let kind = match seq.next_element::<Kind>()? {
                     Some(kind) => kind,
-                    None => return Err(de::Error::invalid_length(2, &self)),
+                    None => return Err(de::Error::invalid_length(1, &self)),
                 }
                 .into();
 
@@ -119,17 +111,22 @@ where
                     let result = match kind {
                         REQUEST_KIND => seq.next_element::<Request>()?.map(Payload::Request),
                         RESPONSE_KIND => seq.next_element::<Response>()?.map(Payload::Response),
-                        ERROR_KIND => seq.next_element::<String>()?.map(Payload::Error),
-                        _ => Some(Payload::Error("invalid message kind".to_string())),
+                        ERROR_KIND => seq.next_element::<Error>()?.map(Payload::Error),
+                        _ => {
+                            return Err(de::Error::unknown_variant(
+                                "unknown message kind",
+                                &["request message", "response message", "error message"],
+                            ))
+                        }
                     };
 
                     match result {
                         Some(payload) => payload,
-                        None => return Err(de::Error::invalid_length(3, &self)),
+                        None => return Err(de::Error::invalid_length(2, &self)),
                     }
                 };
 
-                Ok(Message { tag, id, payload })
+                Ok(Message { id, payload })
             }
         }
 
@@ -165,13 +162,12 @@ mod tests {
         }
     }
 
-    type SimpleMessage = Message<String, String>;
-    type ComplexMessage = Message<Data, Data>;
+    type SimpleMessage = Message<String, String, String>;
+    type ComplexMessage = Message<Data, Data, String>;
 
     #[test]
     fn test_simple_request_serialization() {
         let message: SimpleMessage = SimpleMessage {
-            tag: 1234,
             id: 4052,
             payload: Payload::Request("Some random message".to_string()),
         };
@@ -179,7 +175,6 @@ mod tests {
         let raw = bincode::serialize(&message).unwrap();
         let message2: SimpleMessage = bincode::deserialize(&raw).unwrap();
 
-        assert_eq!(message.tag, message2.tag);
         assert_eq!(message.id, message2.id);
         assert_eq!(message.payload, message2.payload);
     }
@@ -187,7 +182,6 @@ mod tests {
     #[test]
     fn test_simple_response_serialization() {
         let message: SimpleMessage = SimpleMessage {
-            tag: 1234,
             id: 6184,
             payload: Payload::Response("Some random message".to_string()),
         };
@@ -195,7 +189,6 @@ mod tests {
         let raw = bincode::serialize(&message).unwrap();
         let message2: SimpleMessage = bincode::deserialize(&raw).unwrap();
 
-        assert_eq!(message.tag, message2.tag);
         assert_eq!(message.id, message2.id);
         assert_eq!(message.payload, message2.payload);
     }
@@ -203,7 +196,6 @@ mod tests {
     #[test]
     fn test_complex_request_serialization() {
         let message: ComplexMessage = ComplexMessage {
-            tag: 1321,
             id: 1943,
             payload: Payload::Request(Data::new()),
         };
@@ -211,7 +203,6 @@ mod tests {
         let raw = bincode::serialize(&message).unwrap();
         let message2: ComplexMessage = bincode::deserialize(&raw).unwrap();
 
-        assert_eq!(message.tag, message2.tag);
         assert_eq!(message.id, message2.id);
         assert_eq!(message.payload, message2.payload);
     }
@@ -219,7 +210,6 @@ mod tests {
     #[test]
     fn test_complex_response_serialization() {
         let message: ComplexMessage = ComplexMessage {
-            tag: 2053,
             id: 2305,
             payload: Payload::Response(Data::new()),
         };
@@ -227,7 +217,6 @@ mod tests {
         let raw = bincode::serialize(&message).unwrap();
         let message2: ComplexMessage = bincode::deserialize(&raw).unwrap();
 
-        assert_eq!(message.tag, message2.tag);
         assert_eq!(message.id, message2.id);
         assert_eq!(message.payload, message2.payload);
     }
@@ -235,7 +224,6 @@ mod tests {
     #[test]
     fn test_error_serialization() {
         let message: SimpleMessage = SimpleMessage {
-            tag: 1058,
             id: 4932,
             payload: Payload::Error("Oh no something happened!".to_string()),
         };
@@ -243,7 +231,6 @@ mod tests {
         let raw = bincode::serialize(&message).unwrap();
         let message2: SimpleMessage = bincode::deserialize(&raw).unwrap();
 
-        assert_eq!(message.tag, message2.tag);
         assert_eq!(message.id, message2.id);
         assert_eq!(message.payload, message2.payload);
     }

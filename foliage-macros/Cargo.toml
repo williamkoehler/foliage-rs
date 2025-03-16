@@ -1,0 +1,20 @@
+[package]
+name = "foliage-marcos"
+version = "0.1.0"
+edition = "2021"
+description = "Foliage's macros"
+keywords = ["rpc", "two-way", "duplex", "unix", "socket"]
+license = "MIT"
+readme = "README.md"
+repository = "https://github.com/williamkoehler/foliage-rs"
+authors = ["William Köhler <williamkoehler0@gmail.com>"]
+rust-version = "1.84"
+
+[lib]
+proc-macro = true
+
+[dependencies]
+convert_case = "0.7.1"
+darling = "0.20.10"
+quote = "1.0.38"
+syn = { version = "2.0.98", features = ["full"] }

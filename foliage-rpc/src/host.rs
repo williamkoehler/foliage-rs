@@ -40,7 +40,7 @@ where
 
     /// Accepts new peer asynchronously.
     ///
-    pub async fn accept(&self) -> ResultAccept<Peer<MyService, OtherService>> {
+    pub async fn accept(&self) -> ResultAccept<Peer<OtherService>> {
         let (stream, _) = self
             .listener
             .accept()
@@ -48,6 +48,6 @@ where
             .map_err(|err| ErrorAccept::AcceptSocket(err))?;
         let (read, write) = stream.into_split();
 
-        Ok(Peer::new_raw(read, write, 0, self.service.clone()).await)
+        Ok(Peer::new_raw(read, write, self.service.clone()).await)
     }
 }

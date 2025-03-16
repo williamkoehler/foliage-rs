@@ -25,43 +25,44 @@ where
     OtherService: crate::OtherService + 'static,
 {
     request: OtherService::Request,
-    response_sender: oneshot::Sender<Result<OtherService::Response, String>>,
+    response_sender: oneshot::Sender<Result<OtherService::Response, OtherService::Error>>,
 }
 
-pub struct Peer<MyService, OtherService>
+pub struct Peer<OtherService>
 where
-    MyService: crate::MyService + 'static,
     OtherService: crate::OtherService + 'static,
 {
     request_dispatch_sender: mpsc::UnboundedSender<RequestDispatch<OtherService>>,
 
-    phantom_data: PhantomData<(MyService, OtherService)>,
+    phantom_data: PhantomData<OtherService>,
 }
 
-impl<MyService, OtherService> Peer<MyService, OtherService>
+impl<OtherService> Peer<OtherService>
 where
-    MyService: crate::MyService + 'static,
     OtherService: crate::OtherService + 'static,
 {
     /// Creates new peer using a unix socket.
     ///
-    pub async fn new(group_name: &str, tag: Tag, service: MyService) -> ResultNew<Self> {
+    pub async fn new<MyService>(group_name: &str, service: MyService) -> ResultNew<Self>
+    where
+        MyService: crate::MyService + 'static,
+    {
         let stream = tokio::net::UnixStream::connect(socket_path(group_name))
             .await
             .map_err(|err| ErrorNew::BindSocket(err))?;
         let (read, write) = stream.into_split();
 
-        Ok(Self::new_raw(read, write, tag, Arc::new(service)).await)
+        Ok(Self::new_raw(read, write, Arc::new(service)).await)
     }
 
     /// Creates new peer using raw read and write stream pair
-    pub async fn new_raw<Read, Write>(
+    pub async fn new_raw<MyService, Read, Write>(
         read: Read,
         write: Write,
-        tag: Tag,
         service: Arc<MyService>,
     ) -> Self
     where
+        MyService: crate::MyService + 'static,
         Read: AsyncRead + Send + Unpin + 'static,
         Write: AsyncWrite + Send + Unpin + 'static,
     {
@@ -80,7 +81,7 @@ where
 
         // Start worker task
         tokio::spawn(async move {
-            Self::worker(read, write, tag, service, call_receiver).await;
+            Self::worker(read, write, service, call_receiver).await;
         });
 
         Self {
@@ -89,7 +90,7 @@ where
         }
     }
 
-    async fn worker<Read, Write>(
+    async fn worker<MyService, Read, Write>(
         mut read: tokio_util::codec::FramedRead<
             Read,
             BincodeFrameDecoder<crate::InputMessage<MyService, OtherService>>,
@@ -98,18 +99,19 @@ where
             Write,
             BincodeFrameEncoder<crate::OutputMessage<MyService, OtherService>>,
         >,
-        tag: Tag,
         service: Arc<MyService>,
         mut request_dispatch_receiver: mpsc::UnboundedReceiver<RequestDispatch<OtherService>>,
     ) where
+        MyService: crate::MyService + 'static,
         Read: AsyncRead + Unpin,
         Write: AsyncWrite + Unpin,
     {
         let mut outgoing_id_counter: u16 = 0;
         let mut incoming_id_counter: u16 = 0;
 
-        let mut outgoing_rpcs: VecDeque<oneshot::Sender<Result<OtherService::Response, String>>> =
-            VecDeque::new();
+        let mut outgoing_rpcs: VecDeque<
+            oneshot::Sender<Result<OtherService::Response, OtherService::Error>>,
+        > = VecDeque::new();
 
         let mut pending_responses = FuturesOrdered::new();
 
@@ -120,7 +122,7 @@ where
                         Payload::Request(request) => {
                             // Clone service and run rpc handler
                             let service = service.clone();
-                            pending_responses.push_back(async move { (message.id, service.on_rpc(tag, request).await) });
+                            pending_responses.push_back(async move { (message.id, service.on_rpc(request).await) });
                         }
                         Payload::Response(response) => {
                             // Check message id
@@ -162,7 +164,6 @@ where
                 }
                 Some(request_dispatch) = request_dispatch_receiver.recv() => {
                     let message = Message {
-                        tag: tag,
                         id: outgoing_id_counter,
                         payload: Payload::Request(request_dispatch.request),
                     };
@@ -174,16 +175,11 @@ where
                     outgoing_rpcs.push_back(request_dispatch.response_sender);
                 }
                 Some((id, pending_response)) = pending_responses.next() => {
-                    let message = match pending_response {
-                        Ok(response) => Message {
-                            tag: tag,
-                            id: id,
-                            payload: Payload::Response(response),
-                        },
-                        Err(err) => Message {
-                            tag: tag,
-                            id: id,
-                            payload: Payload::Error(err.to_string()),
+                    let message = Message {
+                        id: id,
+                        payload: match pending_response {
+                            Ok(response) => Payload::Response(response),
+                            Err(err) => Payload::Error(err),
                         },
                     };
                     let _ = write.send(message).await;
@@ -202,7 +198,7 @@ where
     pub async fn rpc(
         &mut self,
         request: OtherService::Request,
-    ) -> ResultRpc<OtherService::Response> {
+    ) -> ResultRpc<OtherService::Response, OtherService::Error> {
         // Create response channel
         let (response_sender, response_receiver) = oneshot::channel();
 
@@ -223,9 +219,8 @@ where
     }
 }
 
-impl<MyService, OtherService> Clone for Peer<MyService, OtherService>
+impl<OtherService> Clone for Peer<OtherService>
 where
-    MyService: crate::MyService + 'static,
     OtherService: crate::OtherService + 'static,
 {
     fn clone(&self) -> Self {
